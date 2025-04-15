@@ -1,0 +1,6 @@
+312venv/
+*.pyc
+__pycache__
+.pyc/*
+logs/*.log
+__pycache__/mqtt_handler.cpython-312.pyc
