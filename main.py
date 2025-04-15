@@ -2,74 +2,51 @@ import asyncio
 import signal
 import sys
 import logging
-import os
-from datetime import datetime
 from tqdm import tqdm
 from mqtt_handler import MQTTHandler
+from log_handler import setup_loggers
 
-# Configure logging to file and console
-def setup_logger():
-    """Set up and configure the global logger."""
-    # Create logs directory if it doesn't exist
-    os.makedirs('logs', exist_ok=True)
-    
-    # Create a timestamp for the log filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = f"logs/mqtt_app_{timestamp}.log"
-    
-    # Configure root logger
-    logger = logging.getLogger()
-    logger.setLevel(logging.WARNING)
-    
-    # File handler with timestamp
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
-    file_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(file_format)
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.WARNING)
-    console_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    console_handler.setFormatter(console_format)
-    
-    # Add handlers to the logger
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    logger.warning(f"Logging initialized. Writing to {log_file}")
-    return logger
+# Initialize the loggers
+root_logger, console_logger, file_logger, mqtt_logger = setup_loggers()
 
-# Initialize the global logger
-logger = setup_logger()
+# Use named loggers for different components
+logger = root_logger  # Main application uses root logger
 
 async def timed_status_routine(duration: float, shutdown_event) -> None:
     """Prints the test duration to the console output with a progress bar"""
+    # Get console-specific logger
+    status_logger = logging.getLogger('console')
+    
     end = int(duration)
     
     # Create a progress bar using tqdm
     progress_bar = tqdm(iterable=range(0, end), bar_format="Progress: {percentage:.2f}%  Time Remaining: {remaining} |{bar}|")
     
     try:
+        status_logger.info("Progress bar task started")
         for _ in progress_bar:
             # Check if shutdown is requested before each iteration
             if shutdown_event.is_set():
                 progress_bar.write("Progress bar task stopping due to shutdown request")
+                status_logger.info("Progress bar task stopping due to shutdown request")
                 break
                 
             # Use wait_for with timeout to make the sleep interruptible
             try:
                 await asyncio.wait_for(shutdown_event.wait(), timeout=1)
                 progress_bar.write("Progress bar task interrupted during sleep")
+                status_logger.info("Progress bar task interrupted during sleep")
                 break
             except asyncio.TimeoutError:
                 # Timeout just means we continue with the loop
                 pass
                 
         progress_bar.write("Progress bar task completed")
+        status_logger.info("Progress bar task completed")
         
     except asyncio.CancelledError:
         progress_bar.write("Progress bar task was cancelled")
+        status_logger.info("Progress bar task was cancelled")
     finally:
         progress_bar.close()
 
@@ -196,22 +173,29 @@ def main():
     """Entry point of the application."""
     loop = asyncio.get_event_loop()
     
-    logger.warning("Application starting")
+    # Use different loggers for different types of messages
+    root_logger.warning("Application starting")
+    file_logger.debug("Debug mode enabled - capturing detailed logs to file")
+    console_logger.info("Console logger initialized")
     
     runner = ApplicationRunner()
     runner.setup_signal_handlers(loop)
     
     try:
-        logger.warning("Entering main event loop")
+        root_logger.warning("Entering main event loop")
+        file_logger.debug("Event loop initialization complete")
         loop.run_until_complete(runner.run())
     except KeyboardInterrupt:
-        logger.warning("\033[0;33mProgram interrupted\033[0m")
+        root_logger.warning("\033[0;33mProgram interrupted\033[0m")
     except Exception as e:
-        logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
+        root_logger.error(f"Unexpected error in main loop: {e}", exc_info=True)
+        # MQTT logger will only show errors in console
+        mqtt_logger.error(f"Critical MQTT failure detected in main loop: {e}")
     finally:
-        logger.warning("Closing event loop")
+        root_logger.warning("Closing event loop")
+        file_logger.debug("Performing final cleanup actions")
         loop.close()
-        logger.warning("Application shutdown complete")
+        root_logger.warning("Application shutdown complete")
 
 if __name__ == "__main__":
     main()

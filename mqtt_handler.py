@@ -4,8 +4,8 @@ from aiomqtt import Client
 import time
 import logging
 
-# Get the root logger
-logger = logging.getLogger()
+# Get MQTT-specific logger
+logger = logging.getLogger('mqtt')
 
 # Configuration
 MQTT_CONFIG = {
@@ -36,11 +36,11 @@ class MQTTHandler:
     async def timed_publish(self):
         """Publish a value to the test topic."""
         try:
-            logger.warning("\033[0;34mStarting 15-second timed task\033[0m.....")
+            logger.info("\033[0;34mStarting 15-second timed task\033[0m.....")
             for i in range(1, 15):
                 # Check if shutdown is requested before each iteration
                 if self.shutdown_event.is_set():
-                    logger.warning("Timed task stopping due to shutdown request")
+                    logger.info("Timed task stopping due to shutdown request")
                     break
                     
                 msg = f"Counter : {i}"
@@ -49,20 +49,21 @@ class MQTTHandler:
                 # Use wait_for with timeout to make the sleep interruptible
                 try:
                     await asyncio.wait_for(self.shutdown_event.wait(), timeout=1)
-                    logger.warning("Timed task interrupted during sleep")
+                    logger.info("Timed task interrupted during sleep")
                     break
                 except asyncio.TimeoutError:
                     # Timeout just means we continue with the loop
+                    logger.debug(f"Timed task iteration {i} completed")
                     pass
                     
-            logger.warning("Timed task completed")
+            logger.info("Timed task completed")
             self.exit_confirmed = True
             self.shutdown_event.set()  # Signal all tasks to shut down
             
         except asyncio.CancelledError:
-            logger.warning("Timed task was cancelled")
+            logger.info("Timed task was cancelled")
         except Exception as e:
-            logger.error(f"\033[0;31mError in timed task: {e}\033[0m")            
+            logger.error(f"\033[0;31mError in timed task: {e}\033[0m")       
 
     async def setup_mqtt_client(self):
         """Create and configure MQTT client."""
@@ -80,17 +81,17 @@ class MQTTHandler:
         """Publish a message to a specific topic."""
         try:
             await self.client.publish(topic, message)
-            logger.warning(f"Published '{message}' to {topic}")
+            logger.info(f"Published '{message}' to {topic}")
         except Exception as e:
             logger.error(f"Failed to publish to {topic}: {e}")
-
+            
     async def message_processor(self):
         """Process incoming messages and update last message times."""
         # Subscribe to all topics
         for topic_config in self.topics:
             topic = topic_config["name"]
             await self.client.subscribe(topic)
-            logger.warning(f"Subscribed to {topic}")
+            logger.info(f"Subscribed to {topic}")
         
         # Process incoming messages
         try:
@@ -102,10 +103,12 @@ class MQTTHandler:
                 for topic in self.topic_last_message.keys():
                     if message.topic.matches(topic):
                         self.topic_last_message[topic] = time.time()
-                        logger.warning(f"Received message on {topic}: {message.payload}")
+                        logger.debug(f"Received message on {topic}: {message.payload}")
                         break
         except asyncio.CancelledError:
-            logger.warning("Message processor cancelled")
+            logger.info("Message processor cancelled")
+        except Exception as e:
+            logger.error(f"Error in message processor: {e}", exc_info=True)
 
     async def monitor_missing_messages(self):
         """Monitor for missing messages on all topics."""
@@ -113,6 +116,7 @@ class MQTTHandler:
         last_logged_retry = {topic: 0 for topic in self.topic_last_message.keys()}
         
         try:
+            logger.info("Missing message monitor started")
             while not self.shutdown_event.is_set():
                 current_time = time.time()
                 
@@ -130,10 +134,9 @@ class MQTTHandler:
                         
                         # Log warning if this is a new retry count
                         if topic_retries[topic] > last_logged_retry[topic]:
-                            logger.warning(
-                                f"No message on '{topic}' for {time_since_last:.1f} seconds. "
-                                f"Retry {topic_retries[topic]}/{max_retries}"
-                            )
+                            msg = f"No message on '{topic}' for {time_since_last:.1f} seconds. " f"Retry {topic_retries[topic]}/{max_retries}"
+                            logger.warning(msg)
+                            print(msg) # Override the logging and print anyway
                             last_logged_retry[topic] = topic_retries[topic]
                             await asyncio.sleep(1)
                         
@@ -146,13 +149,16 @@ class MQTTHandler:
                     else:
                         # Reset retry counter if we're within timeout
                         if topic_retries[topic] > 0:
+                            logger.debug(f"Message received on '{topic}', resetting retry counter from {topic_retries[topic]} to 0")
                             topic_retries[topic] = 0
                             last_logged_retry[topic] = 0
                 
                 # Short sleep to avoid CPU spinning
                 await asyncio.sleep(0.1)
         except asyncio.CancelledError:
-            logger.warning("Message monitor cancelled")
+            logger.info("Message monitor cancelled")
+        except Exception as e:
+            logger.error(f"Error in message monitor: {e}", exc_info=True)
 
     async def setup_client(self):
         """Setup the MQTT client and return the AsyncExitStack context manager."""
