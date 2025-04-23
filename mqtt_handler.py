@@ -9,7 +9,7 @@ logger = logging.getLogger('mqtt')
 
 # Configuration
 MQTT_CONFIG = {
-    'host': "192.168.63.25",
+    'host': "127.0.0.1",
     'port': 1883,
     'max_retries': 3,
     'timeout': 3  # seconds
@@ -24,8 +24,8 @@ class MQTTHandler:
         
         # Topic configurations
         self.topics = [
-            {"name": "frequency./#", "max_retries": MQTT_CONFIG['max_retries']},
-            {"name": "simulator/status", "max_retries": MQTT_CONFIG['max_retries']}
+            {"name": "topicA", "max_retries": MQTT_CONFIG['max_retries']},
+            {"name": "topicB", "max_retries": MQTT_CONFIG['max_retries']}
         ]
         
         # Initialize tracking dictionaries for topics
